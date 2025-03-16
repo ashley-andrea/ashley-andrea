@@ -3,7 +3,7 @@
 
 - 🌵 Currently diving deep into data analysis, communication, and marketing.  
   
-- 👾 I enjoy coding just as much as I love designing cute and fun UI elements — like this little guy right here! 👉🏼  <img alt="Dancing easter egg gif" src="Easter egg resized.gif" height="170" width="170" align="center">
+- 👾 I enjoy coding just as much as I love designing cute and fun UI elements — like this little guy right here! 👉🏼     <img alt="Dancing easter egg gif" src="Easter egg resized.gif" height="100" width="83" align="center">
 
 - 🚨 Lately, I've been extremely interested in cybersecurity and distributed systems, so you’ll probably catch me exploring more of that soon. Stay tuned! 🚀
 
