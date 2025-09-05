@@ -1,7 +1,7 @@
 <h1 align="center">Hi, it's Ashley! 🌀</h1>
-<h3 align="center">I'm a final-year bachelor student in AI :)</h3>
+<h3 align="center">I'm an AI graduate, now pursuing an MS in Computer Engineering & CS :)</h3>
 
-- 🌵 Currently diving deep into data analysis, communication, and marketing.  
+- 🌵 Currently learning about 3D modeling for virtual interactions.  
   
 - 👾 I enjoy coding just as much as I love designing cute and fun UI elements — like this little guy right here! 👉🏼     <img alt="Dancing easter egg gif" src="Easter egg resized.gif" height="100" width="83" align="center">
 
