@@ -6,30 +6,26 @@
   const CREAM = "#f7ead1";
   const SHADOW = "rgba(60, 25, 10, 0.35)";
   const LINE = 10; // 9 glyph rows + 1 gap
-  const TYPE_MS = 28;
+  const TYPE_MS = 45;
   const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   // bubble: x/w of the box, and either `bottom` (tail points down) or `side`
   const OBJECTS = {
-    1: { name: "laptop", anchor: [121, 59], box: { x: 41, w: 160, bottom: 54 },
+    1: { name: "laptop", anchor: [121, 59], box: { x: 26, w: 190, bottom: 54 },
          text: "AI grad turned Computer Engineering master's student at Polimi, powered mostly by coffee and stubbornness." },
     2: { name: "coffee", anchor: [50, 89], box: { x: 4, w: 150, bottom: 84 },
          text: "I'm half engineer, half designer: I'll train your model and argue about the perfect button corner radius." },
     3: { name: "plant", anchor: [209, 64], box: { x: 54, w: 150, side: "right" },
          text: "Co-founder of a medtech startup, where I build things that will (hopefully) make life a little kinder for people with epilepsy." },
-    4: { name: "candle", anchor: [29, 75], box: { x: 3, w: 112, bottom: 70 }, chick: true,
+    4: { name: "candle", anchor: [29, 75], box: { x: 3, w: 160, bottom: 70 }, chick: true,
          text: "I can't help giving my apps cute little characters. See exhibit A over there >" },
-    5: { name: "book", anchor: [190, 104], box: { x: 76, w: 160, bottom: 99 },
+    5: { name: "book", anchor: [184, 105], box: { x: 24, w: 172, bottom: 100 },
          text: "The most interesting vulnerability might be human nature! I'm exploring social engineering and the psychology behind cyberattacks." },
     6: { name: "pumpkin", anchor: [202, 86], box: { x: 80, w: 156, bottom: 81 },
          text: "Off-screen, I usually climb rocks, romanticize fall, or cry my heart out to nostalgic music :D" },
   };
 
-  // leaves tumble through these frames; "#" = leaf colour, "+" = dark vein
-  const LEAF_COLORS = ["#f6c14b", "#f29a38", "#d8452a", "#fbe08a"];
-  const LEAF_VEIN = "#6e2814";
-  const LEAF_SHAPES = [[".##", "#+#", "+.."], ["##.", "#+#", "..+"], ["##", "++"], [".#.", "#+#", ".+."]];
-  const CHICK = { x: 120, y: 28, w: 26, h: 32, frames: 7, ms: 250, lid: 60 };
+  const CHICK = { w: 26, h: 32, frames: 7, ms: 250 };
 
   const stage = document.getElementById("stage");
   const canvas = document.getElementById("room");
@@ -54,9 +50,10 @@
     load("room/scene.png"), load("room/hitmap.png"), load("room/chick.png"),
     fetch("room/font.json").then((r) => r.json()),
     fetch("room/title.json").then((r) => r.json()),
+    fetch("room/anim.json").then((r) => r.json()),
   ]).then(start);
 
-  function start([scene, hitmap, chick, font, title]) {
+  function start([scene, hitmap, chick, font, title, anim]) {
     const hit = pixels(hitmap);
     const sceneData = pixels(scene);
     const idAt = (x, y) => (x < 0 || y < 0 || x >= W || y >= H ? 0 : hit[(y * W + x) * 4]);
@@ -118,16 +115,15 @@
     const PAD = 4;
     for (const o of Object.values(OBJECTS)) {
       const b = o.box;
-      o.lines = wrap(o.text, b.w - 2 * PAD - 2);
-      const h = 2 * PAD + 2 + o.lines.length * LINE - 2;
+      const room = o.chick ? CHICK.w + 4 : 0; // the chick stands right of the text
+      o.lines = wrap(o.text, b.w - 2 * PAD - 2 - room);
+      const h = Math.max(2 * PAD + 2 + o.lines.length * LINE - 2, o.chick ? CHICK.h + 2 * PAD + 2 : 0);
       const y = b.side ? Math.round(o.anchor[1] - h / 2) : b.bottom - h;
       o.rect = { x: b.x, y: Math.max(2, y), w: b.w, h };
     }
 
     // ---- state ----
-    let hovered = 0, open = null, openedAt = 0, chickAt = 0, hinted = false;
-    const leaves = [];
-    let nextLeaf = 0;
+    let hovered = 0, open = null, openedAt = 0, hinted = false;
     const sparkle = { id: 0, at: 0 };
 
     const typed = (now) => (open ? (reduceMotion ? open.text.length : Math.floor((now - openedAt) / TYPE_MS)) : 0);
@@ -138,7 +134,6 @@
       if (open === o) return close();
       open = o;
       openedAt = performance.now();
-      chickAt = openedAt;
       live.textContent = o.text;
       // on narrow screens the room pans: bring the bubble into view
       const wrapEl = stage.parentElement, unit = stage.clientWidth / W;
@@ -195,50 +190,68 @@
         left -= line.length + 1;
       });
 
-      // blinking "more" arrow once the text is out
-      if (doneTyping(now) && Math.floor(now / 450) % 2 === 0) {
-        ctx.fillStyle = INK;
-        ctx.fillRect(x + w - 8, y + h - 5, 3, 1);
-        ctx.fillRect(x + w - 7, y + h - 4, 1, 1);
+      // the chick hops in once the whole sentence is out
+      if (o.chick && doneTyping(now)) {
+        const doneAt = openedAt + o.text.length * TYPE_MS;
+        const t = reduceMotion ? 1e9 : now - doneAt;
+        const hop = t < 80 ? 2 : t < 160 ? 1 : 0;
+        const f = Math.floor(t / CHICK.ms) % CHICK.frames;
+        const cx = x + w - PAD - 1 - CHICK.w, cy = y + h - PAD - 1 - CHICK.h;
+        ctx.drawImage(chick, f * CHICK.w, 0, CHICK.w, CHICK.h - hop, cx, cy + hop, CHICK.w, CHICK.h - hop);
       }
     }
 
-    function drawLeaves(now, dt) {
-      if (reduceMotion) return;
-      if (now > nextLeaf && leaves.length < 9) {
-        const left = Math.random() < 0.15;
-        leaves.push({
-          x: left ? 44 + Math.random() * 12 : 74 + Math.random() * 104,
-          y: -3,
-          vy: 5 + Math.random() * 4,
-          drift: (Math.random() - 0.3) * 4,
-          amp: 2 + Math.random() * 3,
-          freq: 0.8 + Math.random() * 0.8,
-          phase: Math.random() * 6,
-          color: LEAF_COLORS[Math.floor(Math.random() * LEAF_COLORS.length)],
-          spin: 280 + Math.random() * 300,
-          born: now,
-        });
-        nextLeaf = now + 900 + Math.random() * 1600;
-      }
+    // ---- falling leaves and coffee steam: same formulas as tools/build.py, 10 ticks/s ----
+    const { leafShapes, leafSpin, leafVein, sill, steam } = anim;
+    function drawLeaves(tick) {
       lctx.globalCompositeOperation = "source-over";
       lctx.clearRect(0, 0, W, H);
-      for (let i = leaves.length - 1; i >= 0; i--) {
-        const l = leaves[i];
-        const t = (now - l.born) / 1000;
-        l.y += l.vy * dt;
-        if (l.y > 95) { leaves.splice(i, 1); continue; }
-        const x = Math.round(l.x + l.drift * t + l.amp * Math.sin(t * l.freq + l.phase));
-        const shape = LEAF_SHAPES[Math.floor((now - l.born) / l.spin) % LEAF_SHAPES.length];
-        shape.forEach((row, j) => [...row].forEach((c, k) => {
+      for (const l of anim.leaves) {
+        const k = (tick + l.offset) % l.period;
+        const tau = k / anim.tps;
+        const y = l.y + l.vy * tau;
+        if (y > sill + 0.5) continue; // behind the window sill now
+        const x = l.x + l.drift * tau + l.amp * Math.sin(l.freq * tau + l.phase);
+        const px = Math.floor(x + 0.5) - 1, py = Math.floor(y + 0.5) - 1;
+        const shape = leafShapes[Math.floor(k / leafSpin) % leafShapes.length];
+        shape.forEach((row, j) => [...row].forEach((c, i) => {
           if (c === ".") return;
-          lctx.fillStyle = c === "#" ? l.color : LEAF_VEIN;
-          lctx.fillRect(x + k, Math.round(l.y) + j, 1, 1);
+          lctx.fillStyle = c === "#" ? l.color : leafVein;
+          lctx.fillRect(px + i, py + j, 1, 1);
         }));
       }
       lctx.globalCompositeOperation = "destination-in";
       lctx.drawImage(glass, 0, 0);
       ctx.drawImage(leafLayer, 0, 0);
+    }
+
+    const steamFill = steam.alphas.map((a) => {
+      const n = parseInt(steam.color.slice(1), 16);
+      return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`;
+    });
+    function drawSteam(tick) {
+      const s = (2 * Math.PI * (tick % steam.ticks)) / steam.ticks;
+      const cells = new Map();
+      for (const [wx, ph] of steam.wisps) {
+        for (let y = steam.top; y <= steam.bottom; y++) {
+          const h = (steam.bottom - y) / (steam.bottom - steam.top); // 0 at the cup, 1 at the top
+          let env = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(0.33 * y + 2 * s + ph * 1.7));
+          env *= 1 - 0.75 * h ** 1.5;
+          if (env < 0.2) continue;
+          const cx = wx + 5 * h + (0.6 + 2.4 * h) * Math.sin(0.19 * y + s + ph);
+          const half = 0.6 + 1.6 * env;
+          for (let x = Math.floor(cx - half + 0.5); x <= Math.floor(cx + half + 0.5); x++) {
+            const a = env * (1 - (0.45 * Math.abs(x - cx)) / half);
+            const level = a > 0.62 ? 0 : a > 0.4 ? 1 : a > 0.18 ? 2 : 3;
+            const key = y * W + x;
+            if (level < 3 && level < (cells.get(key) ?? 3)) cells.set(key, level);
+          }
+        }
+      }
+      for (const [key, level] of cells) {
+        ctx.fillStyle = steamFill[level];
+        ctx.fillRect(key % W, Math.floor(key / W), 1, 1);
+      }
     }
 
     function drawLifted(o) {
@@ -279,15 +292,6 @@
       }
     }
 
-    function drawChick(now) {
-      const t = now - chickAt;
-      const rise = reduceMotion ? 0 : Math.max(0, CHICK.h - Math.floor(t / 10));
-      const frame = Math.floor(t / CHICK.ms) % CHICK.frames;
-      const visible = CHICK.lid - (CHICK.y + rise); // only above the laptop lid
-      if (visible <= 0) return;
-      ctx.drawImage(chick, frame * CHICK.w, 0, CHICK.w, visible, CHICK.x, CHICK.y + rise, CHICK.w, visible);
-    }
-
     function drawHint() {
       if (hinted) return;
       const s = "psst! click around the desk";
@@ -299,17 +303,15 @@
       drawText(ctx, s, x + 4, y + 3, INK);
     }
 
-    let last = performance.now();
     function frame(now) {
-      const dt = Math.min(0.1, (now - last) / 1000);
-      last = now;
+      const tick = reduceMotion ? 0 : Math.floor((now / 1000) * anim.tps);
       ctx.drawImage(scene, 0, 0);
-      drawLeaves(now, dt);
+      if (!reduceMotion) drawLeaves(tick);
+      drawSteam(tick);
       const lifted = hovered && (!open || open.id !== hovered) ? OBJECTS[hovered] : open;
       if (lifted) drawLifted(lifted);
       drawTitle(now, lifted && lifted.id === 1 ? 1 : 0);
       drawSparkle(now);
-      if (open && open.chick) drawChick(now);
       if (open) drawBubble(open, now);
       drawHint();
       requestAnimationFrame(frame);
