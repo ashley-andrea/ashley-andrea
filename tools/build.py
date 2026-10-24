@@ -2,8 +2,9 @@
 
     python3 tools/build.py
 
-Writes room/scene.png, room/hitmap.png, room/chick.png, room/font.json, room/title.json,
-room/anim.json and scene.svg.
+Writes room/scene.png, room/chick.png, room/font.json, room/anim.json and scene.svg.
+Object contours, the leaf window, bubble boxes and the text size live in room/config.json:
+edit them with `python3 tools/editor.py` (it is created from the defaults below if missing).
 """
 import base64
 import io
@@ -13,7 +14,7 @@ import os
 import random
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image
 
 from font import GLYPHS, draw_text, text_width
 
@@ -28,7 +29,9 @@ X0, Y0 = -0.83, 4.38 - PITCH  # cell boundaries measured on the foreground
 
 INK = (43, 38, 36)  # matte black for every text
 
-# Clickable objects, traced row by row on the grid: y -> (first x, last x).
+CONFIG = os.path.join(ROOT, "room", "config.json")
+
+# Default contours of the clickable objects, traced row by row: y -> (first x, last x).
 # Ids match room.js.
 def _rows(*spans):
     out = {}
@@ -38,7 +41,7 @@ def _rows(*spans):
     return out
 
 
-OBJECTS = {
+DEFAULT_MASKS = {
     1: _rows((59, 59, 90, 150), (60, 60, 89, 151), (61, 104, 89, 152),            # laptop
              (105, 105, 87, 153), (106, 106, 87, 154), (107, 107, 86, 154), (108, 108, 85, 155),
              (109, 109, 84, 156), (110, 110, 83, 158), (111, 111, 82, 159), (112, 112, 81, 160),
@@ -64,11 +67,22 @@ OBJECTS = {
 
 # Window panes (x0, x1 inclusive, down to the sill); leaves only show here,
 # minus whatever stands in front of the glass
-PANES = [(45, 64), (68, 179), (186, 192)]
+PANES = [(45, 64), (68, 176), (186, 191)]
 SILL = 92                       # last row of glass above the window sill
 CANDLE_RIGHT = (169, 81, 186, 102)  # x0 y0 x1 y1, the jar in front of the glass
 
 SCREEN = (92, 62, 151, 101)  # laptop screen interior, x0 y0 x1 y1 (exclusive)
+
+# Speech bubbles: box left edge, width and bottom edge; the tail points at `anchor`
+# (from the bottom, or from the right side for side: "right").
+DEFAULT_BUBBLES = {
+    "1": {"anchor": [121, 59], "x": 26, "w": 190, "bottom": 54},
+    "2": {"anchor": [50, 89], "x": 4, "w": 150, "bottom": 84},
+    "3": {"anchor": [209, 64], "x": 54, "w": 150, "bottom": 92, "side": "right"},
+    "4": {"anchor": [29, 75], "x": 3, "w": 160, "bottom": 70},
+    "5": {"anchor": [184, 105], "x": 24, "w": 172, "bottom": 100},
+    "6": {"anchor": [202, 86], "x": 80, "w": 156, "bottom": 81},
+}
 
 
 def snap_to_grid():
@@ -134,26 +148,68 @@ def erase_steam(px):
                 px[y, x] = src[yy, x]
 
 
-def glass_mask():
+def default_glass():
     g = np.zeros((H, W), bool)
     for x0, x1 in PANES:
         g[:SILL + 1, x0:x1 + 1] = True
-    for oid in (1, 2):
-        for y, (x0, x1) in OBJECTS[oid].items():
+    for rows in DEFAULT_MASKS.values():  # nothing standing in front of the window
+        for y, (x0, x1) in rows.items():
             g[y, x0:x1 + 1] = False
     cx0, cy0, cx1, cy1 = CANDLE_RIGHT
     g[cy0:cy1 + 1, cx0:cx1 + 1] = False
     return g
 
 
-def hitmap():
-    """R = object id, G = 255 where leaves can show through the glass."""
-    r = Image.new("L", (W, H), 0)
-    for oid, rows in OBJECTS.items():
+def to_runs(mask):
+    """Boolean grid -> [[y, x0, x1], ...] with inclusive ends."""
+    runs = []
+    for y in range(H):
+        x = 0
+        while x < W:
+            if mask[y, x]:
+                x0 = x
+                while x < W and mask[y, x]:
+                    x += 1
+                runs.append([y, x0, x - 1])
+            x += 1
+    return runs
+
+
+def from_runs(runs):
+    mask = np.zeros((H, W), bool)
+    for y, x0, x1 in runs:
+        mask[y, x0:x1 + 1] = True
+    return mask
+
+
+def load_config():
+    """room/config.json, created from the defaults the first time."""
+    if os.path.exists(CONFIG):
+        with open(CONFIG) as f:
+            return json.load(f)
+    masks = {}
+    for oid, rows in DEFAULT_MASKS.items():
+        m = np.zeros((H, W), bool)
         for y, (x0, x1) in rows.items():
-            ImageDraw.Draw(r).line([(x0, y), (x1, y)], fill=oid)
-    g = Image.fromarray(np.where(glass_mask(), 255, 0).astype(np.uint8))
-    return Image.merge("RGB", (r, g, Image.new("L", (W, H), 0)))
+            m[y, x0:x1 + 1] = True
+        masks[str(oid)] = to_runs(m)
+    masks["glass"] = to_runs(default_glass())
+    config = {"textScale": 1, "bubbles": DEFAULT_BUBBLES, "masks": masks}
+    save_config(config)
+    return config
+
+
+def save_config(config):
+    """One run per line keeps the file readable in diffs."""
+    lines = ["{", f'  "textScale": {json.dumps(config["textScale"])},',
+             f'  "bubbles": {json.dumps(config["bubbles"])},', '  "masks": {']
+    keys = list(config["masks"])
+    for n, key in enumerate(keys):
+        runs = ",\n      ".join(json.dumps(r) for r in config["masks"][key])
+        lines.append(f'    "{key}": [\n      {runs}\n    ]' + ("," if n < len(keys) - 1 else ""))
+    lines += ["  }", "}"]
+    with open(CONFIG, "w") as f:
+        f.write("\n".join(lines) + "\n")
 
 
 def chick_sheet():
@@ -175,20 +231,21 @@ def chick_sheet():
     return sheet
 
 
-def title_pixels():
-    """'Hi, it's' / 'Ashley!' centred on the screen; returns pixels + cursor spot."""
+def title_layout(p):
+    """'Hi, it's' / 'Ashley!_' centred on the laptop screen, for text pixel size p.
+    Returns the lit pixels' top-left corners and the cursor rectangle. Mirrors room.js."""
     x0, y0, x1, y1 = SCREEN
-    lines = ["Hi, it's", "Ashley!"]
-    cursor_w = len(GLYPHS["_"][0]) + 1
-    top = y0 + (y1 - y0 - 19) // 2 - 3
-    pts = []
-    cx = (x0 + x1) // 2
-    for n, s in enumerate(lines):
-        w = text_width(s) + (cursor_w if n == 1 else 0)
-        x = cx - w // 2
-        draw_text(lambda px, py: pts.append((px, py)), s, x, top + n * 11)
-        if n == 1:
-            cursor = (x + text_width(s) + 2, top + 11 + 7)
+    snap = lambda v: math.floor(v / p + 1e-9) * p
+    top = snap(y0 + (y1 - y0 - 19 * p) / 2 - 3 * p)
+    cx = (x0 + x1) / 2
+    pts, cursor = [], None
+    for n, line in enumerate(["Hi, it's", "Ashley!"]):
+        w = (text_width(line) + (6 if n else 0)) * p
+        x = snap(cx - w / 2)
+        y = top + n * 11 * p
+        draw_text(lambda i, j: pts.append((x + i * p, y + j * p)), line, 0, 0)
+        if n:
+            cursor = (x + (text_width(line) + 2) * p, y + 7 * p, 4 * p, p)
     return pts, cursor
 
 
@@ -290,25 +347,14 @@ def _shape_path(shape, kind):
     return _run_path([(i, j, 1) for j, row in enumerate(shape) for i, c in enumerate(row) if c == kind])
 
 
-def readme_svg(scene, pts, cursor):
+def readme_svg(scene, config):
     """Animated SVG for the README: GitHub allows CSS animations, not scripts."""
-    titled = scene.copy()
-    for p in pts:
-        titled.putpixel(p, INK)
-    big = titled.resize((W * SVG_SCALE, H * SVG_SCALE), Image.NEAREST)
+    big = scene.resize((W * SVG_SCALE, H * SVG_SCALE), Image.NEAREST)
     b64 = base64.b64encode(png_bytes(big)).decode()
-
-    glass = glass_mask()
-    runs = []
-    for y in range(H):
-        x = 0
-        while x < W:
-            if glass[y, x]:
-                x0 = x
-                while x < W and glass[y, x]:
-                    x += 1
-                runs.append((x0, y, x - x0))
-            x += 1
+    runs = [(x0, y, x1 - x0 + 1) for y, x0, x1 in config["masks"]["glass"]]
+    p = config["textScale"]
+    pts, cursor = title_layout(p)
+    title = "".join(f"M{x:g} {y:g}h{p:g}v{p:g}h-{p:g}z" for x, y in pts)
 
     css = [
         ".blink{animation:blink 1.06s step-end infinite}@keyframes blink{50%{opacity:0}}",
@@ -357,7 +403,7 @@ def readme_svg(scene, pts, cursor):
             for level, a in enumerate(STEAM["alphas"]))
         steam.append(f'<g class="fr" style="animation-delay:{(k - ticks) / TPS:g}s">{paths}</g>')
 
-    cx, cy = cursor
+    cx, cy, cw, ch = cursor
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{SVG_WIDTH}" '
         f'height="{round(SVG_WIDTH * H / W)}" shape-rendering="crispEdges">'
@@ -367,7 +413,8 @@ def readme_svg(scene, pts, cursor):
         f'<image width="{W}" height="{H}" href="data:image/png;base64,{b64}"/>'
         f'<g clip-path="url(#glass)">{"".join(leaves)}</g>'
         f'{"".join(steam)}'
-        f'<rect class="blink" x="{cx}" y="{cy}" width="4" height="1" fill="rgb{INK}"/>'
+        f'<path fill="rgb{INK}" d="{title}"/>'
+        f'<rect class="blink" x="{cx:g}" y="{cy:g}" width="{cw:g}" height="{ch:g}" fill="rgb{INK}"/>'
         f"</svg>"
     )
 
@@ -378,20 +425,15 @@ def main():
     erase_steam(px)
     scene = Image.fromarray(px)
     scene.save(os.path.join(ROOT, "room", "scene.png"), optimize=True)
-    hitmap().save(os.path.join(ROOT, "room", "hitmap.png"))
     chick_sheet().save(os.path.join(ROOT, "room", "chick.png"))
     with open(os.path.join(ROOT, "room", "font.json"), "w") as f:
         json.dump(GLYPHS, f, separators=(",", ":"))
-
-    pts, cursor = title_pixels()
-    with open(os.path.join(ROOT, "room", "title.json"), "w") as f:
-        json.dump({"pixels": pts, "cursor": cursor}, f, separators=(",", ":"))
 
     with open(os.path.join(ROOT, "room", "anim.json"), "w") as f:
         json.dump(ANIM, f, separators=(",", ":"))
 
     with open(os.path.join(ROOT, "scene.svg"), "w") as f:
-        f.write(readme_svg(scene, pts, cursor))
+        f.write(readme_svg(scene, load_config()))
 
 
 if __name__ == "__main__":

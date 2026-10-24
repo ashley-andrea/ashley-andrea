@@ -1,150 +1,178 @@
-// Ashley's cozy pixel room. Everything is drawn on a 240x134 canvas so every
-// pixel (scene, text, bubbles, leaves) shares the same grid.
+// Ashley's cozy pixel room. The scene, leaves, steam and bubbles live on a 240x134
+// grid; the canvas is drawn at whole device pixels per grid pixel so nothing blurs.
+// Contours, the leaf window, bubble boxes and the text size come from room/config.json
+// (edit them with tools/editor.py). The page boots it; the editor reuses PixelRoom.
 (() => {
   const W = 240, H = 134;
   const INK = "#2b2624";
   const CREAM = "#f7ead1";
   const SHADOW = "rgba(60, 25, 10, 0.35)";
-  const LINE = 10; // 9 glyph rows + 1 gap
+  const LINE = 10; // 9 glyph rows + 1 gap, in text pixels
+  const PAD = 4;
   const TYPE_MS = 45;
+  const HINT = "psst! click around the desk";
+  const CHICK = { w: 26, h: 32, frames: 7, ms: 250 };
+  const SCREEN = [92, 62, 151, 101]; // laptop screen interior, x0 y0 x1 y1 (exclusive)
   const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  // bubble: x/w of the box, and either `bottom` (tail points down) or `side`
   const OBJECTS = {
-    1: { name: "laptop", anchor: [121, 59], box: { x: 26, w: 190, bottom: 54 },
-         text: "AI grad turned Computer Engineering master's student at Polimi, powered mostly by coffee and stubbornness." },
-    2: { name: "coffee", anchor: [50, 89], box: { x: 4, w: 150, bottom: 84 },
-         text: "I'm half engineer, half designer: I'll train your model and argue about the perfect button corner radius." },
-    3: { name: "plant", anchor: [209, 64], box: { x: 54, w: 150, side: "right" },
-         text: "Co-founder of a medtech startup, where I build things that will (hopefully) make life a little kinder for people with epilepsy." },
-    4: { name: "candle", anchor: [29, 75], box: { x: 3, w: 160, bottom: 70 }, chick: true,
-         text: "I can't help giving my apps cute little characters. See exhibit A over there >" },
-    5: { name: "book", anchor: [184, 105], box: { x: 24, w: 172, bottom: 100 },
-         text: "The most interesting vulnerability might be human nature! I'm exploring social engineering and the psychology behind cyberattacks." },
-    6: { name: "pumpkin", anchor: [202, 86], box: { x: 80, w: 156, bottom: 81 },
-         text: "Off-screen, I usually climb rocks, romanticize fall, or cry my heart out to nostalgic music :D" },
+    1: { name: "laptop", text: "AI grad turned Computer Engineering master's student at Polimi, powered mostly by coffee and stubbornness." },
+    2: { name: "coffee", text: "I'm half engineer, half designer: I'll train your model and argue about the perfect button corner radius." },
+    3: { name: "plant", text: "Co-founder of a medtech startup, where I build things that will (hopefully) make life a little kinder for people with epilepsy." },
+    4: { name: "candle", chick: true, text: "I can't help giving my apps cute little characters. See exhibit A over there >" },
+    5: { name: "book", text: "The most interesting vulnerability might be human nature! I'm exploring social engineering and the psychology behind cyberattacks." },
+    6: { name: "pumpkin", text: "Off-screen, I usually climb rocks, romanticize fall, or cry my heart out to nostalgic music :D" },
   };
 
-  const CHICK = { w: 26, h: 32, frames: 7, ms: 250 };
-
-  const stage = document.getElementById("stage");
-  const canvas = document.getElementById("room");
-  const ctx = canvas.getContext("2d");
-  const live = document.getElementById("live");
-
-  const load = (src) => new Promise((ok, fail) => {
+  const loadImage = (src) => new Promise((ok, fail) => {
     const im = new Image();
     im.onload = () => ok(im);
     im.onerror = fail;
     im.src = src;
   });
-  const pixels = (im) => {
-    const c = document.createElement("canvas");
-    c.width = im.width; c.height = im.height;
-    const x = c.getContext("2d");
-    x.drawImage(im, 0, 0);
-    return x.getImageData(0, 0, im.width, im.height).data;
-  };
+  const json = (src) => fetch(src, { cache: "no-store" }).then((r) => r.json());
 
-  Promise.all([
-    load("room/scene.png"), load("room/hitmap.png"), load("room/chick.png"),
-    fetch("room/font.json").then((r) => r.json()),
-    fetch("room/title.json").then((r) => r.json()),
-    fetch("room/anim.json").then((r) => r.json()),
-  ]).then(start);
+  function load(base = "") {
+    return Promise.all([
+      loadImage(base + "room/scene.png"), loadImage(base + "room/chick.png"),
+      json(base + "room/font.json"), json(base + "room/anim.json"), json(base + "room/config.json"),
+    ]).then(([scene, chick, font, anim, config]) => ({ scene, chick, font, anim, config }));
+  }
 
-  function start([scene, hitmap, chick, font, title, anim]) {
-    const hit = pixels(hitmap);
-    const sceneData = pixels(scene);
-    const idAt = (x, y) => (x < 0 || y < 0 || x >= W || y >= H ? 0 : hit[(y * W + x) * 4]);
+  function create({ stage, canvas, assets, interactive = true, fitTo }) {
+    const { scene, chick, font, anim } = assets;
+    let config = assets.config;
+    const ctx = canvas.getContext("2d");
+    const live = document.getElementById("live");
+    const objects = Object.fromEntries(Object.entries(OBJECTS).map(([id, o]) => [id, { ...o, id: +id }]));
 
-    // per object: its pixels, bbox, and the cream outline of its lifted copy
-    for (const [id, o] of Object.entries(OBJECTS)) {
-      o.id = +id;
-      o.px = [];
-      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (idAt(x, y) === o.id) o.px.push([x, y]);
-      const xs = o.px.map((p) => p[0]), ys = o.px.map((p) => p[1]);
-      o.bbox = [Math.min(...xs), Math.min(...ys), Math.max(...xs) + 1, Math.max(...ys) + 1];
-      const inside = (x, y) => idAt(x, y) === o.id || idAt(x, y + 1) === o.id;
-      o.outline = [];
-      for (let y = -1; y <= H; y++) for (let x = -1; x <= W; x++) {
-        if (inside(x, y)) continue;
-        if (inside(x - 1, y) || inside(x + 1, y) || inside(x, y - 1) || inside(x, y + 1)) o.outline.push([x, y]);
-      }
-      o.colors = o.px.map(([x, y]) => {
-        const i = (y * W + x) * 4;
-        return `rgb(${sceneData[i]},${sceneData[i + 1]},${sceneData[i + 2]})`;
-      });
-    }
+    const sceneData = (() => {
+      const c = document.createElement("canvas");
+      c.width = W; c.height = H;
+      const x = c.getContext("2d");
+      x.drawImage(scene, 0, 0);
+      return x.getImageData(0, 0, W, H).data;
+    })();
 
-    // glass mask for the leaves
+    // ---- masks: which object owns each pixel, and where the glass shows the leaves ----
+    const ids = new Uint8Array(W * H);
+    const glassGrid = new Uint8Array(W * H);
     const glass = document.createElement("canvas");
     glass.width = W; glass.height = H;
-    const gctx = glass.getContext("2d");
-    const gimg = gctx.createImageData(W, H);
-    for (let i = 0; i < W * H; i++) gimg.data[i * 4 + 3] = hit[i * 4 + 1];
-    gctx.putImageData(gimg, 0, 0);
     const leafLayer = document.createElement("canvas");
     leafLayer.width = W; leafLayer.height = H;
     const lctx = leafLayer.getContext("2d");
+    const idAt = (x, y) => (x < 0 || y < 0 || x >= W || y >= H ? 0 : ids[y * W + x]);
 
-    // ---- text ----
+    function readMasks() {
+      ids.fill(0);
+      glassGrid.fill(0);
+      for (const [key, runs] of Object.entries(config.masks)) {
+        const grid = key === "glass" ? glassGrid : ids;
+        const v = key === "glass" ? 1 : +key;
+        for (const [y, x0, x1] of runs) for (let x = x0; x <= x1; x++) grid[y * W + x] = v;
+      }
+      rebuildMasks();
+    }
+
+    // per object: its pixels, bbox, and the cream outline of its lifted copy
+    function rebuildMasks() {
+      for (const o of Object.values(objects)) {
+        o.px = [];
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (ids[y * W + x] === o.id) o.px.push([x, y]);
+        const xs = o.px.map((p) => p[0]), ys = o.px.map((p) => p[1]);
+        o.bbox = o.px.length ? [Math.min(...xs), Math.min(...ys), Math.max(...xs) + 1, Math.max(...ys) + 1] : [0, 0, 0, 0];
+        const inside = (x, y) => idAt(x, y) === o.id || idAt(x, y + 1) === o.id;
+        o.outline = [];
+        for (let y = -1; y <= H; y++) for (let x = -1; x <= W; x++) {
+          if (inside(x, y)) continue;
+          if (inside(x - 1, y) || inside(x + 1, y) || inside(x, y - 1) || inside(x, y + 1)) o.outline.push([x, y]);
+        }
+        o.colors = o.px.map(([x, y]) => {
+          const i = (y * W + x) * 4;
+          return `rgb(${sceneData[i]},${sceneData[i + 1]},${sceneData[i + 2]})`;
+        });
+      }
+      const g = glass.getContext("2d");
+      const img = g.createImageData(W, H);
+      for (let i = 0; i < W * H; i++) img.data[i * 4 + 3] = glassGrid[i] ? 255 : 0;
+      g.putImageData(img, 0, 0);
+    }
+
+    // ---- text: drawn in device pixels so any text size stays crisp ----
+    let k = 1;      // device pixels per grid pixel
+    let tp = 1;     // device pixels per text pixel
+    const p = () => tp / k; // text pixel in grid units
     const glyph = (c) => font[c] || font["?"];
     const textWidth = (s) => [...s].reduce((w, c) => w + glyph(c)[0].length + 1, 0) - 1;
-    function drawText(c2, s, x, y, color) {
-      c2.fillStyle = color;
+    function drawText(s, x, y, color) {
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = color;
+      let ox = Math.round(x * k);
+      const oy = Math.round(y * k);
       for (const ch of s) {
         const g = glyph(ch);
         for (let j = 0; j < g.length; j++)
-          for (let i = 0; i < g[j].length; i++) if (g[j][i] === "#") c2.fillRect(x + i, y + j, 1, 1);
-        x += g[0].length + 1;
+          for (let i = 0; i < g[j].length; i++) if (g[j][i] === "#") ctx.fillRect(ox + i * tp, oy + j * tp, tp, tp);
+        ox += (g[0].length + 1) * tp;
       }
+      ctx.restore();
     }
     function wrap(s, width) {
       const lines = [];
       let line = "";
       for (const word of s.split(" ")) {
         const next = line ? line + " " + word : word;
-        if (textWidth(next) > width && line) { lines.push(line); line = word; } else line = next;
+        if (textWidth(next) * p() > width && line) { lines.push(line); line = word; } else line = next;
       }
       lines.push(line);
       return lines;
     }
 
-    // ---- bubble layout ----
-    const PAD = 4;
-    for (const o of Object.values(OBJECTS)) {
-      const b = o.box;
-      const room = o.chick ? CHICK.w + 4 : 0; // the chick stands right of the text
-      o.lines = wrap(o.text, b.w - 2 * PAD - 2 - room);
-      const h = Math.max(2 * PAD + 2 + o.lines.length * LINE - 2, o.chick ? CHICK.h + 2 * PAD + 2 : 0);
-      const y = b.side ? Math.round(o.anchor[1] - h / 2) : b.bottom - h;
-      o.rect = { x: b.x, y: Math.max(2, y), w: b.w, h };
+    // ---- layout: bubbles and the laptop title depend on the text size ----
+    let title = null;
+    function layout() {
+      tp = Math.max(1, Math.round(config.textScale * k));
+      for (const o of Object.values(objects)) {
+        const b = (o.box = config.bubbles[o.id]);
+        const room = o.chick ? CHICK.w + 4 : 0; // the chick stands right of the text
+        o.lines = wrap(o.text, b.w - 2 * PAD - 2 - room);
+        const h = Math.max(2 * PAD + 2 + Math.ceil((o.lines.length * LINE - 2) * p()), o.chick ? CHICK.h + 2 * PAD + 2 : 0);
+        o.rect = { x: b.x, y: Math.max(1, b.bottom - h), w: b.w, h };
+      }
+      // mirrors title_layout() in tools/build.py
+      const q = p(), snap = (v) => Math.floor(v / q + 1e-9) * q;
+      const [x0, y0, x1, y1] = SCREEN;
+      const top = snap(y0 + (y1 - y0 - 19 * q) / 2 - 3 * q);
+      const cx = (x0 + x1) / 2;
+      title = ["Hi, it's", "Ashley!"].map((s, n) => ({
+        s, x: snap(cx - ((textWidth(s) + (n ? 6 : 0)) * q) / 2), y: top + n * 11 * q,
+      }));
+      title.cursor = [title[1].x + (textWidth("Ashley!") + 2) * q, title[1].y + 7 * q];
     }
 
     // ---- state ----
-    let hovered = 0, open = null, openedAt = 0, hinted = false;
+    let hovered = 0, open = null, openedAt = 0, hinted = !interactive;
     const sparkle = { id: 0, at: 0 };
-
     const typed = (now) => (open ? (reduceMotion ? open.text.length : Math.floor((now - openedAt) / TYPE_MS)) : 0);
     const doneTyping = (now) => open && typed(now) >= open.text.length;
 
-    function openObject(o) {
+    function openObject(o, { instant = false } = {}) {
       hinted = true;
-      if (open === o) return close();
       open = o;
-      openedAt = performance.now();
-      live.textContent = o.text;
+      openedAt = instant ? -1e9 : performance.now();
+      if (live) live.textContent = o.text;
       // on narrow screens the room pans: bring the bubble into view
       const wrapEl = stage.parentElement, unit = stage.clientWidth / W;
-      if (wrapEl.scrollWidth > wrapEl.clientWidth) {
+      if (interactive && wrapEl.scrollWidth > wrapEl.clientWidth) {
         const mid = (Math.min(o.rect.x, o.bbox[0]) + Math.max(o.rect.x + o.rect.w, o.bbox[2])) / 2;
         wrapEl.scrollTo({ left: 16 + mid * unit - wrapEl.clientWidth / 2, behavior: "smooth" });
       }
     }
     function close() {
       open = null;
-      live.textContent = "";
+      if (live) live.textContent = "";
     }
 
     // ---- drawing ----
@@ -161,7 +189,7 @@
       ctx.fillRect(x + 1, y + 1, w - 2, h - 2);
 
       // tail
-      const [ax, ay] = o.anchor;
+      const [ax, ay] = o.box.anchor;
       if (o.box.side === "right") {
         const ty = Math.min(Math.max(ay, y + 4), y + h - 5);
         for (let i = 0; i < 4; i++) {
@@ -185,8 +213,7 @@
       let left = typed(now);
       o.lines.forEach((line, n) => {
         if (left <= 0) return;
-        const part = line.slice(0, left);
-        drawText(ctx, part, x + PAD + 1, y + PAD + 1 + n * LINE, INK);
+        drawText(line.slice(0, left), x + PAD + 1, y + PAD + 1 + n * LINE * p(), INK);
         left -= line.length + 1;
       });
 
@@ -207,13 +234,13 @@
       lctx.globalCompositeOperation = "source-over";
       lctx.clearRect(0, 0, W, H);
       for (const l of anim.leaves) {
-        const k = (tick + l.offset) % l.period;
-        const tau = k / anim.tps;
+        const kk = (tick + l.offset) % l.period;
+        const tau = kk / anim.tps;
         const y = l.y + l.vy * tau;
         if (y > sill + 0.5) continue; // behind the window sill now
         const x = l.x + l.drift * tau + l.amp * Math.sin(l.freq * tau + l.phase);
         const px = Math.floor(x + 0.5) - 1, py = Math.floor(y + 0.5) - 1;
-        const shape = leafShapes[Math.floor(k / leafSpin) % leafShapes.length];
+        const shape = leafShapes[Math.floor(kk / leafSpin) % leafShapes.length];
         shape.forEach((row, j) => [...row].forEach((c, i) => {
           if (c === ".") return;
           lctx.fillStyle = c === "#" ? l.color : leafVein;
@@ -261,18 +288,20 @@
     }
 
     function drawTitle(now, lift) {
-      ctx.fillStyle = INK;
-      for (const [x, y] of title.pixels) ctx.fillRect(x, y - lift, 1, 1);
-      if (Math.floor(now / 530) % 2 === 0) ctx.fillRect(title.cursor[0], title.cursor[1] - lift, 4, 1);
+      for (const t of title) drawText(t.s, t.x, t.y - lift, INK);
+      if (Math.floor(now / 530) % 2 === 0) {
+        ctx.fillStyle = INK;
+        ctx.fillRect(title.cursor[0], title.cursor[1] - lift, 4 * p(), p());
+      }
     }
 
     function drawSparkle(now) {
-      if (open || reduceMotion) return;
+      if (open || reduceMotion || !interactive) return;
       if (now - sparkle.at > 2600) {
-        const ids = Object.keys(OBJECTS).map(Number).filter((id) => id !== sparkle.id);
-        sparkle.id = ids[Math.floor(Math.random() * ids.length)];
+        const choices = Object.keys(objects).map(Number).filter((id) => id !== sparkle.id);
+        sparkle.id = choices[Math.floor(Math.random() * choices.length)];
         sparkle.at = now;
-        const [x0, y0, x1] = OBJECTS[sparkle.id].bbox;
+        const [x0, y0, x1] = objects[sparkle.id].bbox;
         sparkle.x = x0 + Math.floor((x1 - x0) * (0.6 + Math.random() * 0.3));
         sparkle.y = y0 + 1;
       }
@@ -294,86 +323,118 @@
 
     function drawHint() {
       if (hinted) return;
-      const s = "psst! click around the desk";
-      const w = textWidth(s) + 8, x = Math.floor((W - w) / 2), y = 3;
+      const q = p();
+      const w = Math.ceil(textWidth(HINT) * q) + 8, h = Math.ceil(9 * q) + 6;
+      const x = Math.floor((W - w) / 2), y = 3;
       ctx.fillStyle = INK;
-      ctx.fillRect(x + 1, y, w - 2, 15); ctx.fillRect(x, y + 1, w, 13);
+      ctx.fillRect(x + 1, y, w - 2, h); ctx.fillRect(x, y + 1, w, h - 2);
       ctx.fillStyle = CREAM;
-      ctx.fillRect(x + 1, y + 1, w - 2, 13);
-      drawText(ctx, s, x + 4, y + 3, INK);
+      ctx.fillRect(x + 1, y + 1, w - 2, h - 2);
+      drawText(HINT, x + 4, y + 3, INK);
     }
+
+    const api = {
+      W, H, objects, ids, glassGrid, overlay: null, showLeaves: true,
+      get config() { return config; },
+      get hovered() { return hovered; },
+      set hovered(id) { hovered = id; },
+      get open() { return open; },
+      idAt, openObject, close, rebuildMasks, readMasks, layout: () => layout(),
+      setConfig(c) { config = c; readMasks(); layout(); },
+      toGrid(e) {
+        const r = canvas.getBoundingClientRect();
+        return [Math.floor(((e.clientX - r.left) / r.width) * W), Math.floor(((e.clientY - r.top) / r.height) * H)];
+      },
+      fit,
+    };
 
     function frame(now) {
       const tick = reduceMotion ? 0 : Math.floor((now / 1000) * anim.tps);
+      ctx.setTransform(k, 0, 0, k, 0, 0);
+      ctx.imageSmoothingEnabled = false;
       ctx.drawImage(scene, 0, 0);
-      if (!reduceMotion) drawLeaves(tick);
+      if (!reduceMotion && api.showLeaves) drawLeaves(tick);
       drawSteam(tick);
-      const lifted = hovered && (!open || open.id !== hovered) ? OBJECTS[hovered] : open;
+      const lifted = hovered && (!open || open.id !== hovered) ? objects[hovered] : open;
       if (lifted) drawLifted(lifted);
       drawTitle(now, lifted && lifted.id === 1 ? 1 : 0);
       drawSparkle(now);
       if (open) drawBubble(open, now);
       drawHint();
-      requestAnimationFrame(frame);
-    }
-    requestAnimationFrame(frame);
-
-    // ---- input ----
-    const toGrid = (e) => {
-      const r = canvas.getBoundingClientRect();
-      return [Math.floor(((e.clientX - r.left) / r.width) * W), Math.floor(((e.clientY - r.top) / r.height) * H)];
-    };
-    const inBubble = (x, y) => open && x >= open.rect.x && x < open.rect.x + open.rect.w && y >= open.rect.y && y < open.rect.y + open.rect.h;
-    canvas.addEventListener("pointermove", (e) => {
-      const [x, y] = toGrid(e);
-      hovered = inBubble(x, y) ? 0 : idAt(x, y);
-      canvas.style.cursor = hovered || inBubble(x, y) ? "pointer" : "default";
-    });
-    canvas.addEventListener("pointerleave", () => { hovered = 0; });
-    canvas.addEventListener("click", (e) => {
-      const [x, y] = toGrid(e);
-      const now = performance.now();
-      if (inBubble(x, y)) {
-        if (doneTyping(now)) close(); else openedAt = -1e9;
-        return;
+      if (api.overlay) {
+        ctx.setTransform(k, 0, 0, k, 0, 0);
+        api.overlay(ctx, k);
       }
-      const id = idAt(x, y);
-      if (id) openObject(OBJECTS[id]); else close();
-    });
-    addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
-
-    // invisible buttons over each object, for keyboards and screen readers
-    for (const o of Object.values(OBJECTS)) {
-      const b = document.createElement("button");
-      const [x0, y0, x1, y1] = o.bbox;
-      b.className = "hotspot";
-      b.setAttribute("aria-label", `The ${o.name}`);
-      Object.assign(b.style, {
-        left: `${(x0 / W) * 100}%`, top: `${(y0 / H) * 100}%`,
-        width: `${((x1 - x0) / W) * 100}%`, height: `${((y1 - y0) / H) * 100}%`,
-      });
-      b.addEventListener("focus", () => { hovered = o.id; });
-      b.addEventListener("blur", () => { hovered = 0; });
-      b.addEventListener("click", (e) => {
-        if (e.detail === 0) openObject(o); // keyboard only; mouse clicks go to the canvas
-      });
-      stage.appendChild(b);
+      requestAnimationFrame(frame);
     }
 
     // ---- sizing: whole device pixels per grid pixel, never blurry ----
     function fit() {
       const dpr = devicePixelRatio || 1;
-      const availW = innerWidth - 32, availH = innerHeight - 72;
-      let k = Math.floor(Math.min(availW / W, availH / H) * dpr);
+      const [availW, availH] = fitTo ? fitTo() : [innerWidth - 32, innerHeight - 72];
+      k = Math.floor(Math.min(availW / W, availH / H) * dpr);
       k = Math.max(k, Math.ceil(2 * dpr), 1); // never smaller than 2 css px: scroll instead
-      const unit = k / dpr;
-      stage.style.width = `${W * unit}px`;
-      stage.style.height = `${H * unit}px`;
+      canvas.width = W * k;
+      canvas.height = H * k;
+      stage.style.width = `${(W * k) / dpr}px`;
+      stage.style.height = `${(H * k) / dpr}px`;
+      layout();
       const wrapEl = stage.parentElement;
-      wrapEl.scrollLeft = (wrapEl.scrollWidth - wrapEl.clientWidth) / 2;
+      if (interactive) wrapEl.scrollLeft = (wrapEl.scrollWidth - wrapEl.clientWidth) / 2;
     }
+
+    readMasks();
+    fit();
     addEventListener("resize", fit);
     matchMedia(`(resolution: ${devicePixelRatio}dppx)`).addEventListener?.("change", fit);
-    fit();
+    requestAnimationFrame(frame);
+
+    if (interactive) {
+      const inBubble = (x, y) => open && x >= open.rect.x && x < open.rect.x + open.rect.w && y >= open.rect.y && y < open.rect.y + open.rect.h;
+      canvas.addEventListener("pointermove", (e) => {
+        const [x, y] = api.toGrid(e);
+        hovered = inBubble(x, y) ? 0 : idAt(x, y);
+        canvas.style.cursor = hovered || inBubble(x, y) ? "pointer" : "default";
+      });
+      canvas.addEventListener("pointerleave", () => { hovered = 0; });
+      canvas.addEventListener("click", (e) => {
+        const [x, y] = api.toGrid(e);
+        const now = performance.now();
+        if (inBubble(x, y)) {
+          if (doneTyping(now)) close(); else openedAt = -1e9;
+          return;
+        }
+        const id = idAt(x, y);
+        if (id && open !== objects[id]) openObject(objects[id]); else close();
+      });
+      addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
+
+      // invisible buttons over each object, for keyboards and screen readers
+      for (const o of Object.values(objects)) {
+        const b = document.createElement("button");
+        const [x0, y0, x1, y1] = o.bbox;
+        b.className = "hotspot";
+        b.setAttribute("aria-label", `The ${o.name}`);
+        Object.assign(b.style, {
+          left: `${(x0 / W) * 100}%`, top: `${(y0 / H) * 100}%`,
+          width: `${((x1 - x0) / W) * 100}%`, height: `${((y1 - y0) / H) * 100}%`,
+        });
+        b.addEventListener("focus", () => { hovered = o.id; });
+        b.addEventListener("blur", () => { hovered = 0; });
+        b.addEventListener("click", (e) => {
+          if (e.detail === 0) openObject(o); // keyboard only; mouse clicks go to the canvas
+        });
+        stage.appendChild(b);
+      }
+    }
+    return api;
+  }
+
+  window.PixelRoom = { W, H, load, create };
+
+  if (document.currentScript?.hasAttribute("data-autostart")) {
+    load().then((assets) => create({
+      stage: document.getElementById("stage"), canvas: document.getElementById("room"), assets,
+    }));
   }
 })();
