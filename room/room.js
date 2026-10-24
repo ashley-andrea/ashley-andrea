@@ -16,11 +16,11 @@
   const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   const OBJECTS = {
-    1: { name: "laptop", text: "AI grad turned Computer Engineering master's student at Polimi, powered mostly by coffee and stubbornness." },
-    2: { name: "coffee", text: "I'm half engineer, half designer: I'll train your model and argue about the perfect button corner radius." },
-    3: { name: "plant", text: "Co-founder of a medtech startup, where I build things that will (hopefully) make life a little kinder for people with epilepsy." },
-    4: { name: "candle", chick: true, text: "I can't help giving my apps cute little characters. See exhibit A over there >" },
-    5: { name: "book", text: "The most interesting vulnerability might be human nature! I'm exploring social engineering and the psychology behind cyberattacks." },
+    1: { name: "laptop", text: "AI grad turned Computer Engineering master's student at Polimi, powered mostly by coffee and stubbornness :P" },
+    2: { name: "coffee", text: "I'm half engineer, half designer: I'll train your model and argue about the perfect button corner radius hehe" },
+    3: { name: "plant", text: "Co-founder of a medtech startup, where I build things that will (hopefully) make life a little kinder for people with epilepsy" },
+    4: { name: "candle", chick: true, text: "I can't help giving my apps cute little characters. See exhibit A over here ->" },
+    5: { name: "book", text: "The most interesting vulnerability might be human nature! I'm exploring social engineering and the psychology behind cyberattacks B)" },
     6: { name: "pumpkin", text: "Off-screen, I usually climb rocks, romanticize fall, or cry my heart out to nostalgic music :D" },
   };
 
@@ -136,9 +136,11 @@
       tp = Math.max(1, Math.round(config.textScale * k));
       for (const o of Object.values(objects)) {
         const b = (o.box = config.bubbles[o.id]);
-        const room = o.chick ? CHICK.w + 4 : 0; // the chick stands right of the text
+        // the chick stands right of the text, drawn with text-sized pixels
+        const room = o.chick ? Math.ceil(CHICK.w * p()) + 4 : 0;
         o.lines = wrap(o.text, b.w - 2 * PAD - 2 - room);
-        const h = Math.max(2 * PAD + 2 + Math.ceil((o.lines.length * LINE - 2) * p()), o.chick ? CHICK.h + 2 * PAD + 2 : 0);
+        const textH = 2 * PAD + 2 + Math.ceil((o.lines.length * LINE - 2) * p());
+        const h = Math.max(textH, o.chick ? Math.ceil(CHICK.h * p()) + 2 * PAD + 2 : 0);
         o.rect = { x: b.x, y: Math.max(1, b.bottom - h), w: b.w, h };
       }
       // mirrors title_layout() in tools/build.py
@@ -221,10 +223,15 @@
       if (o.chick && doneTyping(now)) {
         const doneAt = openedAt + o.text.length * TYPE_MS;
         const t = reduceMotion ? 1e9 : now - doneAt;
-        const hop = t < 80 ? 2 : t < 160 ? 1 : 0;
+        const hop = t < 80 ? 2 : t < 160 ? 1 : 0; // in chick pixels
         const f = Math.floor(t / CHICK.ms) % CHICK.frames;
-        const cx = x + w - PAD - 1 - CHICK.w, cy = y + h - PAD - 1 - CHICK.h;
-        ctx.drawImage(chick, f * CHICK.w, 0, CHICK.w, CHICK.h - hop, cx, cy + hop, CHICK.w, CHICK.h - hop);
+        const cx = Math.round((x + w - PAD - 1) * k) - CHICK.w * tp;
+        const cy = Math.round((y + h - PAD - 1) * k) - CHICK.h * tp;
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(chick, f * CHICK.w, 0, CHICK.w, CHICK.h - hop, cx, cy + hop * tp, CHICK.w * tp, (CHICK.h - hop) * tp);
+        ctx.restore();
       }
     }
 
