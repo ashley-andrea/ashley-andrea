@@ -1,12 +1,23 @@
-<h1 align="center">Hi, it's Ashley! 🌀</h1>
-<h3 align="center">I'm an AI graduate, now pursuing an MS in Computer Engineering & CS :)</h3>
+<p align="center">
+  <a href="https://ashley-andrea.github.io/ashley-andrea/">
+    <img src="scene.svg" width="720" alt="Pixel art: a cozy desk by an autumn window, with a laptop saying Hi, it's Ashley!">
+  </a>
+</p>
 
-- 🌵 Currently learning about 3D modeling for virtual interactions.  
-  
-- 👾 I enjoy coding just as much as I love designing cute and fun UI elements — like this little guy right here! 👉🏼     <img alt="Dancing easter egg gif" src="Easter egg resized.gif" height="100" width="83" align="center">
+<p align="center"><b><a href="https://ashley-andrea.github.io/ashley-andrea/">🍂 step inside and click things on the desk 🍂</a></b></p>
 
-- 🚨 Lately, I've been extremely interested in cybersecurity and distributed systems, so you’ll probably catch me exploring more of that soon. Stay tuned! 🚀
+<details>
+<summary>...or just read about me here</summary>
+<br>
 
+- ☕ AI grad turned Computer Engineering master's student at Polimi, powered mostly by coffee and stubbornness.
+- 🍂 I'm half engineer, half designer: I'll train your model *and* argue about the perfect button corner radius.
+- 🌀 Co-founder of a medtech startup, where I build things that will (hopefully) make life a little kinder for people with epilepsy.
+- 👾 I can't help giving my apps cute little characters. See exhibit A over there 👉🏼 <img alt="Dancing chick" src="Easter egg resized.gif" height="48" align="center">
+- 🔐 The most interesting vulnerability might be human nature! I'm exploring social engineering and the psychology behind cyberattacks.
+- 🧗 Off-screen, I usually climb rocks, romanticize fall, or cry my heart out to nostalgic music :D
+
+</details>
 
 ---
 <h3 align="center">Here are some of my skills:</h3>

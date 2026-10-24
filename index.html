@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ashley's Room</title>
+  <meta name="description" content="Hi, it's Ashley! Click things on the desk to get to know me.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8' shape-rendering='crispEdges'%3E%3Cpath fill='%23e8862a' d='M3 0h2v1h1v1h1v2h-1v1h-1v1h-1v2h-1v-2h-1v-1h-1v-1h-1v-2h1v-1h1z'/%3E%3C/svg%3E">
+  <style>
+    :root {
+      --bg: #1c1210;
+      --cream: #f7ead1;
+      --muted: #b89878;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      background: var(--bg);
+      color: var(--cream);
+      font: 13px/1.4 ui-monospace, "SF Mono", Menlo, monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100%;
+      gap: 16px;
+      padding: 16px 0;
+    }
+    .wrap {
+      max-width: 100%;
+      overflow-x: auto;
+      overflow-y: hidden;
+      padding: 0 16px;
+      scrollbar-width: none;
+    }
+    .wrap::-webkit-scrollbar { display: none; }
+    #stage { position: relative; margin: 0 auto; }
+    #room {
+      display: block;
+      width: 100%;
+      height: 100%;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .hotspot {
+      position: absolute;
+      background: none;
+      border: 0;
+      padding: 0;
+      pointer-events: none;
+      opacity: 0;
+    }
+    .sr-only {
+      position: absolute;
+      width: 1px; height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+    }
+    footer { color: var(--muted); padding: 0 16px; text-align: center; }
+    footer a { color: var(--cream); }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <div id="stage">
+      <canvas id="room" width="240" height="134" aria-label="A cozy pixel-art desk in front of an autumn window. The laptop says: Hi, it's Ashley!"></canvas>
+    </div>
+  </main>
+  <p id="live" class="sr-only" aria-live="polite"></p>
+  <footer>click (or tab to) things on the desk · <a href="https://github.com/ashley-andrea">back to github</a></footer>
+  <noscript><p>This little room needs JavaScript to come alive.</p></noscript>
+  <script src="room/room.js"></script>
+</body>
+</html>
