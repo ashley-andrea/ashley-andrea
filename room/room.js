@@ -1,7 +1,7 @@
 // Ashley's cozy pixel room. The scene, leaves, steam and bubbles live on a 240x134
 // grid; the canvas is drawn at whole device pixels per grid pixel so nothing blurs.
-// Contours, the leaf window, bubble boxes and the text size come from room/config.json
-// (edit them with tools/editor.py). The page boots it; the editor reuses PixelRoom.
+// Contours, the leaf window, bubble boxes, the text size and hand-painted pixels come from
+// room/config.json (edit them with tools/editor.py). The page boots it; the editor reuses PixelRoom.
 (() => {
   const W = 240, H = 134;
   const INK = "#2b2624";
@@ -46,13 +46,33 @@
     const live = document.getElementById("live");
     const objects = Object.fromEntries(Object.entries(OBJECTS).map(([id, o]) => [id, { ...o, id: +id }]));
 
-    const sceneData = (() => {
-      const c = document.createElement("canvas");
-      c.width = W; c.height = H;
-      const x = c.getContext("2d");
-      x.drawImage(scene, 0, 0);
-      return x.getImageData(0, 0, W, H).data;
-    })();
+    // ---- the scene: room/scene.png with the hand-painted pixels of config.pixels on top ----
+    const sceneCanvas = document.createElement("canvas");
+    sceneCanvas.width = W; sceneCanvas.height = H;
+    const sctx = sceneCanvas.getContext("2d");
+    sctx.drawImage(scene, 0, 0);
+    const baseData = sctx.getImageData(0, 0, W, H).data;
+    const sceneImage = sctx.createImageData(W, H);
+    const sceneData = sceneImage.data;
+    const pixels = new Map(); // y * W + x -> "#rrggbb"
+
+    function readPixels() {
+      pixels.clear();
+      for (const [x, y, c] of config.pixels || []) pixels.set(y * W + x, c);
+      paintScene();
+    }
+    function paintScene() {
+      sceneData.set(baseData);
+      for (const [i, c] of pixels) {
+        const n = parseInt(c.slice(1), 16);
+        sceneData[i * 4] = n >> 16;
+        sceneData[i * 4 + 1] = (n >> 8) & 255;
+        sceneData[i * 4 + 2] = n & 255;
+      }
+      sctx.putImageData(sceneImage, 0, 0);
+      for (const o of Object.values(objects)) if (o.px) colorObject(o);
+    }
+    const hex = (data, i) => "#" + [0, 1, 2].map((c) => data[i * 4 + c].toString(16).padStart(2, "0")).join("");
 
     // ---- masks: which object owns each pixel, and where the glass shows the leaves ----
     const ids = new Uint8Array(W * H);
@@ -88,15 +108,19 @@
           if (inside(x, y)) continue;
           if (inside(x - 1, y) || inside(x + 1, y) || inside(x, y - 1) || inside(x, y + 1)) o.outline.push([x, y]);
         }
-        o.colors = o.px.map(([x, y]) => {
-          const i = (y * W + x) * 4;
-          return `rgb(${sceneData[i]},${sceneData[i + 1]},${sceneData[i + 2]})`;
-        });
+        colorObject(o);
       }
       const g = glass.getContext("2d");
       const img = g.createImageData(W, H);
       for (let i = 0; i < W * H; i++) img.data[i * 4 + 3] = glassGrid[i] ? 255 : 0;
       g.putImageData(img, 0, 0);
+    }
+
+    function colorObject(o) {
+      o.colors = o.px.map(([x, y]) => {
+        const i = (y * W + x) * 4;
+        return `rgb(${sceneData[i]},${sceneData[i + 1]},${sceneData[i + 2]})`;
+      });
     }
 
     // ---- text: drawn in device pixels so any text size stays crisp ----
@@ -341,13 +365,15 @@
     }
 
     const api = {
-      W, H, objects, ids, glassGrid, overlay: null, showLeaves: true,
+      W, H, objects, ids, glassGrid, pixels, overlay: null, showLeaves: true, showSteam: true,
       get config() { return config; },
       get hovered() { return hovered; },
       set hovered(id) { hovered = id; },
       get open() { return open; },
-      idAt, openObject, close, rebuildMasks, readMasks, layout: () => layout(),
-      setConfig(c) { config = c; readMasks(); layout(); },
+      idAt, openObject, close, rebuildMasks, readMasks, paintScene, layout: () => layout(),
+      setConfig(c) { config = c; readPixels(); readMasks(); layout(); },
+      colorAt: (x, y) => hex(sceneData, y * W + x),
+      baseColorAt: (x, y) => hex(baseData, y * W + x),
       toGrid(e) {
         const r = canvas.getBoundingClientRect();
         return [Math.floor(((e.clientX - r.left) / r.width) * W), Math.floor(((e.clientY - r.top) / r.height) * H)];
@@ -359,9 +385,9 @@
       const tick = reduceMotion ? 0 : Math.floor((now / 1000) * anim.tps);
       ctx.setTransform(k, 0, 0, k, 0, 0);
       ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(scene, 0, 0);
+      ctx.drawImage(sceneCanvas, 0, 0);
       if (!reduceMotion && api.showLeaves) drawLeaves(tick);
-      drawSteam(tick);
+      if (api.showSteam) drawSteam(tick);
       const lifted = hovered && (!open || open.id !== hovered) ? objects[hovered] : open;
       if (lifted) drawLifted(lifted);
       drawTitle(now, lifted && lifted.id === 1 ? 1 : 0);
@@ -390,6 +416,7 @@
       if (interactive) wrapEl.scrollLeft = (wrapEl.scrollWidth - wrapEl.clientWidth) / 2;
     }
 
+    readPixels();
     readMasks();
     fit();
     addEventListener("resize", fit);

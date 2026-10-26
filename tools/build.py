@@ -3,8 +3,9 @@
     python3 tools/build.py
 
 Writes room/scene.png, room/chick.png, room/font.json, room/anim.json and scene.svg.
-Object contours, the leaf window, bubble boxes and the text size live in room/config.json:
-edit them with `python3 tools/editor.py` (it is created from the defaults below if missing).
+Object contours, the leaf window, bubble boxes, the text size and hand-painted pixels live in
+room/config.json: edit them with `python3 tools/editor.py` (it is created from the defaults below
+if missing). scene.png stays unpainted; room.js draws the painted pixels on top, scene.svg bakes them in.
 """
 import base64
 import io
@@ -194,7 +195,7 @@ def load_config():
             m[y, x0:x1 + 1] = True
         masks[str(oid)] = to_runs(m)
     masks["glass"] = to_runs(default_glass())
-    config = {"textScale": 1, "bubbles": DEFAULT_BUBBLES, "masks": masks}
+    config = {"textScale": 1, "bubbles": DEFAULT_BUBBLES, "masks": masks, "pixels": []}
     save_config(config)
     return config
 
@@ -207,9 +208,21 @@ def save_config(config):
     for n, key in enumerate(keys):
         runs = ",\n      ".join(json.dumps(r) for r in config["masks"][key])
         lines.append(f'    "{key}": [\n      {runs}\n    ]' + ("," if n < len(keys) - 1 else ""))
-    lines += ["  }", "}"]
+    lines.append("  },")
+    rows = {}
+    for p in config.get("pixels", []):  # one line per row of painted pixels
+        rows.setdefault(p[1], []).append(json.dumps(p))
+    body = ",\n    ".join(", ".join(r) for _, r in sorted(rows.items()))
+    lines += [f'  "pixels": [\n    {body}\n  ]' if rows else '  "pixels": []', "}"]
     with open(CONFIG, "w") as f:
         f.write("\n".join(lines) + "\n")
+
+
+def paint_pixels(px, pixels):
+    out = px.copy()
+    for x, y, c in pixels:
+        out[y, x] = [int(c[i:i + 2], 16) for i in (1, 3, 5)]
+    return out
 
 
 def chick_sheet():
@@ -423,8 +436,8 @@ def main():
     px = snap_to_grid()
     erase_screen_text(px)
     erase_steam(px)
-    scene = Image.fromarray(px)
-    scene.save(os.path.join(ROOT, "room", "scene.png"), optimize=True)
+    Image.fromarray(px).save(os.path.join(ROOT, "room", "scene.png"), optimize=True)
+    config = load_config()
     chick_sheet().save(os.path.join(ROOT, "room", "chick.png"))
     with open(os.path.join(ROOT, "room", "font.json"), "w") as f:
         json.dump(GLYPHS, f, separators=(",", ":"))
@@ -433,7 +446,7 @@ def main():
         json.dump(ANIM, f, separators=(",", ":"))
 
     with open(os.path.join(ROOT, "scene.svg"), "w") as f:
-        f.write(readme_svg(scene, load_config()))
+        f.write(readme_svg(Image.fromarray(paint_pixels(px, config.get("pixels", []))), config))
 
 
 if __name__ == "__main__":

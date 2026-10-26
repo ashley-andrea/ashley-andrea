@@ -1,4 +1,4 @@
-"""Local editor for the pixel room: text size, speech bubbles, object contours, leaf window.
+"""Local editor for the pixel room: text size, speech bubbles, object contours, leaf window, pixel colours.
 
     python3 tools/editor.py            # then open the printed URL
 
@@ -8,6 +8,7 @@ Only listens on 127.0.0.1.
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import webbrowser
@@ -47,7 +48,16 @@ def validate(config):
             y, x0, x1 = run
             if not (0 <= y < H and 0 <= x0 <= x1 < W):
                 raise ValueError(f"mask {key}: run {run} is outside the room")
-    return {"textScale": scale, "bubbles": bubbles, "masks": masks}
+    pixels = config.get("pixels", [])
+    if not isinstance(pixels, list):
+        raise ValueError("pixels must be a list")
+    for p in pixels:
+        if not (isinstance(p, list) and len(p) == 3 and all(isinstance(v, int) for v in p[:2])
+                and isinstance(p[2], str) and re.fullmatch(r"#[0-9a-f]{6}", p[2])):
+            raise ValueError(f'pixels: {p} must be [x, y, "#rrggbb"]')
+        if not (0 <= p[0] < W and 0 <= p[1] < H):
+            raise ValueError(f"pixels: {p} is outside the room")
+    return {"textScale": scale, "bubbles": bubbles, "masks": masks, "pixels": pixels}
 
 
 class Handler(SimpleHTTPRequestHandler):
